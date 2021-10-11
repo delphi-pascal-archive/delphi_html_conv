@@ -1,0 +1,304 @@
+<pre>
+<b>unit</b> DelphiToHTML;
+
+<b>interface</b>
+
+<b>uses</b>
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, StdCtrls;
+
+<b>type</b>
+  TDelphiToHTML = <b>class</b>(TObject)
+  <b>private</b>
+    ReservList: TStringList; <i style="color: navy;">// Список зарезервированных слов</i>
+    DelphiList: TStringList;
+    HTMLList: TStringList;
+    DelimSet: <b>set</b> <b>of</b> char;
+    
+    <i style="color: navy;">// Здесь вы можете включать недостающие резервные слова.</i>
+    <i style="color: navy;">// но помните, что некоторые резервные слова имеют смысл</i>
+    <i style="color: navy;">// только в определенные местах кода (например, write).</i>
+    <i style="color: navy;">// Подобные резервные слова в список добавлять не стоит</i>
+    <b>procedure</b> LoadReservList;
+    <b>procedure</b> ReplaceText(CharNum: Integer; OldText, NewText: <b>string</b>;
+      <b>var</b> Text: <b>string</b>);
+    <b>function</b> GetWord(nByte: Integer; S: <b>string</b>): <b>string</b>;
+    <b>function</b> IsReservWord(S: <b>string</b>): Boolean;
+    <b>function</b> IsValue(S: <b>string</b>): Boolean;
+  <b>public</b>
+    <i style="color: navy;">{с буквы B начинается открывающий тэг, с буквы E - закрывающий тэг}</i>
+    Bcom, Ecom, <i style="color: navy;">// Комментарии</i>
+    Bres, Eres, <i style="color: navy;">// Зарезирвированные слова</i>
+    Bnum, Enum, <i style="color: navy;">// Числа</i>
+    Bstr, Estr, <i style="color: navy;">// Строки</i>
+    Bdir, Edir <i style="color: navy;">// Директивы компилятора</i>
+    : <b>string</b>;
+  <b>public</b>
+    <b>constructor</b> Create(); <b>overload</b>;
+    <b>destructor</b> Destroy(); <b>override</b>;
+    <b>function</b> Convert(DelphiText: <b>string</b>; GenHTMLPage: Boolean = False): <b>string</b>;
+  <b>published</b>
+  <b>end</b>;
+
+
+<b>implementation</b>
+
+<i style="color: navy;">{ TDelphiToHTML }</i>
+
+<b>function</b> TDelphiToHTML.Convert(DelphiText: <b>string</b>;
+  GenHTMLPage: Boolean = False): <b>string</b>;
+<b>var</b>
+  I, J, C: Integer;
+  S: <b>string</b>;
+  Str: <b>string</b>;
+  IsCom, IsCom1, IsDir, IsDir1, IsStr: Boolean;
+<b>begin</b>
+  HTMLList.Clear;
+  <b>if</b> GenHTMLPage <b>then</b> <b>begin</b>
+    HTMLList.Add(<span style="color: navy;">'&lt;!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN"&gt;'</span>);
+    HTMLList.Add(<span style="color: navy;">'&lt;html&gt;'</span>);
+    HTMLList.Add(<span style="color: navy;">'&lt;head&gt;'</span>);
+    HTMLList.Add(<span style="color: navy;">'&lt;title&gt; New Document &lt;/title&gt;'</span>);
+    HTMLList.Add(<span style="color: navy;">'&lt;meta name="Generator" content="MatrixHelpProducer"&gt;'</span>);
+    HTMLList.Add(<span style="color: navy;">' &lt;meta content="text/html; charset=windows-1251"'</span> +
+      <span style="color: navy;">' http-equiv="content-type"&gt;'</span>);
+    HTMLList.Add(<span style="color: navy;">'&lt;/head&gt;'</span>);
+    HTMLList.Add(<span style="color: navy;">'&lt;body&gt;'</span>);
+  <b>end</b>;
+  HTMLList.Add(<span style="color: navy;">'&lt;pre&gt;'</span>);
+  DelphiList.Text := DelphiText;
+  <b>if</b> DelphiList.Count = <span style="color: navy;">0</span> <b>then</b> Exit;
+
+  IsCom := False; <i style="color: navy;">// Комментарий</i>
+  IsCom1 := False;
+  IsDir := False; <i style="color: navy;">// Директива компилятора</i>
+  IsDir1 := False;
+  <b>for</b> I := <span style="color: navy;">0</span> <b>to</b> DelphiList.Count - <span style="color: navy;">1</span> <b>do</b> <b>begin</b>
+    S := DelphiList[I];
+    <i style="color: navy;">// Заменяем символы &lt; &gt; на &lt; &gt;</i>
+    <b>while</b> Pos(<span style="color: navy;">'&lt;'</span>, S) &gt; <span style="color: navy;">0</span> <b>do</b> ReplaceText(Pos(<span style="color: navy;">'&lt;'</span>, S), <span style="color: navy;">'&lt;'</span>, <span style="color: navy;">'&lt;'</span>, S);
+    <b>while</b> Pos(<span style="color: navy;">'&gt;'</span>, S) &gt; <span style="color: navy;">0</span> <b>do</b> ReplaceText(Pos(<span style="color: navy;">'&gt;'</span>, S), <span style="color: navy;">'&gt;'</span>, <span style="color: navy;">'&gt;'</span>, S);
+    J := <span style="color: navy;">0</span>;
+    IsStr := False; <i style="color: navy;">// Строка</i>
+    <b>while</b> J &lt; Length(S) <b>do</b> <b>begin</b>
+      Inc(J);
+      <i style="color: navy;">// Если директива компилятора {$...}</i>
+      <b>if</b> (S[J] = <span style="color: navy;">'{'</span>) <b>and</b> (S[J + <span style="color: navy;">1</span>] = <span style="color: navy;">'$'</span>) <b>and</b>
+        <b>not</b> (IsCom <b>or</b> IsDir <b>or</b> IsStr <b>or</b> IsCom1 <b>or</b> IsDir1) <b>then</b> <b>begin</b>
+        IsDir := True;
+        Insert(Bdir, S, J);
+        Inc(J, Length(Bdir) + <span style="color: navy;">1</span>);
+        Continue;
+      <b>end</b>;
+      <b>if</b> (S[J] = <span style="color: navy;">'}'</span>) <b>and</b> Isdir <b>then</b> <b>begin</b>
+        IsDir := False;
+        Insert(Edir, S, J + <span style="color: navy;">1</span>);
+        Inc(J, Length(Edir));
+        Continue;
+      <b>end</b>;
+      <i style="color: navy;">// Если директива компилятора {(*$...*)}</i>
+      <b>if</b> (S[J] = <span style="color: navy;">'('</span>) <b>and</b> (S[J + <span style="color: navy;">1</span>] = <span style="color: navy;">'*'</span>) <b>and</b> (S[J + <span style="color: navy;">2</span>] = <span style="color: navy;">'$'</span>) <b>and</b>
+        <b>not</b> (IsCom <b>or</b> IsDir <b>or</b> IsStr <b>or</b> IsCom1 <b>or</b> IsDir1) <b>then</b> <b>begin</b>
+        IsDir1 := True;
+        Insert(Bdir, S, J);
+        Inc(J, Length(Bdir) + <span style="color: navy;">2</span>);
+        Continue;
+      <b>end</b>;
+      <b>if</b> (S[J] = <span style="color: navy;">'*'</span>) <b>and</b> (S[J + <span style="color: navy;">1</span>] = <span style="color: navy;">')'</span>) <b>and</b> IsDir1 <b>then</b> <b>begin</b>
+        IsDir1 := False;
+        Insert(Edir, S, J + <span style="color: navy;">2</span>);
+        Inc(J, Length(Edir) + <span style="color: navy;">1</span>);
+        Continue;
+      <b>end</b>;
+
+      <i style="color: navy;">// Если ограничивающие коментарии {...}</i>
+      <b>if</b> (S[J] = <span style="color: navy;">'{'</span>) <b>and</b> <b>not</b> (IsCom <b>or</b> IsDir <b>or</b> IsStr <b>or</b> IsCom1 <b>or</b> IsDir1) <b>then</b>
+        <b>begin</b>
+        IsCom := True;
+        Insert(Bcom, S, J);
+        Inc(J, Length(Bcom));
+        Continue;
+      <b>end</b>;
+      <b>if</b> (S[J] = <span style="color: navy;">'}'</span>) <b>and</b> IsCom <b>then</b> <b>begin</b>
+        IsCom := False;
+        Insert(Ecom, S, J + <span style="color: navy;">1</span>);
+        Inc(J, Length(Ecom));
+        Continue;
+      <b>end</b>;
+      <i style="color: navy;">// Если ограничивающие коментарии (*...*)</i>
+      <b>if</b> (S[J] = <span style="color: navy;">'('</span>) <b>and</b> (S[J + <span style="color: navy;">1</span>] = <span style="color: navy;">'*'</span>) <b>and</b>
+        <b>not</b> (IsCom <b>or</b> IsDir <b>or</b> IsStr <b>or</b> IsCom1 <b>or</b> IsDir1) <b>then</b> <b>begin</b>
+        IsCom1 := True;
+        Insert(Bcom, S, J);
+        Inc(J, Length(Bcom) + <span style="color: navy;">1</span>);
+        Continue;
+      <b>end</b>;
+      <b>if</b> (S[J] = <span style="color: navy;">'*'</span>) <b>and</b> (S[J + <span style="color: navy;">1</span>] = <span style="color: navy;">')'</span>) <b>and</b> IsCom1 <b>then</b> <b>begin</b>
+        IsCom1 := False;
+        Insert(Ecom, S, J + <span style="color: navy;">2</span>);
+        Inc(J, Length(Ecom) + <span style="color: navy;">1</span>);
+        Continue;
+      <b>end</b>;
+      <i style="color: navy;">// Если идет строка текста '...'</i>
+      <b>if</b> (S[J] = <span style="color: navy;">''</span><span style="color: navy;">''</span>) <b>and</b> <b>not</b> (IsCom <b>or</b> IsDir <b>or</b> IsStr <b>or</b> IsCom1 <b>or</b> IsDir1)
+        <b>then</b> <b>begin</b>
+        IsStr := True;
+        Insert(Bstr, S, J);
+        Inc(J, Length(Bstr));
+        Continue;
+      <b>end</b>;
+      <b>if</b> (S[J] = <span style="color: navy;">''</span><span style="color: navy;">''</span>) <b>and</b> IsStr <b>then</b> <b>begin</b>
+        IsStr := False;
+        Insert(Estr, S, J + <span style="color: navy;">1</span>);
+        Inc(J, Length(Estr));
+        Continue;
+      <b>end</b>;
+      <i style="color: navy;">// Если комментарий // ...</i>
+      <b>if</b> (S[J] = <span style="color: navy;">'/'</span>) <b>and</b> (S[J + <span style="color: navy;">1</span>] = <span style="color: navy;">'/'</span>) <b>and</b>
+        <b>not</b> (IsCom <b>or</b> IsDir <b>or</b> IsStr <b>or</b> IsCom1 <b>or</b> IsDir1) <b>then</b> <b>begin</b>
+        Insert(Bcom, S, J);
+        Insert(Ecom, S, Length(S) + <span style="color: navy;">1</span>);
+        Break;
+      <b>end</b>;
+
+      <i style="color: navy;">// Выделяем жирным шрифтом основные слова</i>
+      <b>if</b> <b>not</b> (IsCom <b>or</b> IsDir <b>or</b> IsStr <b>or</b> IsCom1 <b>or</b> IsDir1) <b>and</b>
+        (((S[J] <b>in</b> DelimSet) <b>and</b> <b>not</b> (S[J + <span style="color: navy;">1</span>] <b>in</b> DelimSet)) <b>or</b>
+        ((J = <span style="color: navy;">1</span>) <b>and</b> <b>not</b> (S[J] <b>in</b> DelimSet))) <b>then</b> <b>begin</b>
+        <b>if</b> (J = <span style="color: navy;">1</span>) <b>and</b> <b>not</b> (S[J] <b>in</b> DelimSet) <b>then</b> C := <span style="color: navy;">1</span> <b>else</b> C := J + <span style="color: navy;">1</span>;
+        Str := GetWord(C, S);
+        <b>if</b> IsReservWord(Str) <b>then</b> <b>begin</b>
+          <i style="color: navy;">// Выделяем жирным шрифтом</i>
+          Insert(Bres, S, C);
+          C := C + Length(Bres + Str);
+          Insert(Eres, S, C);
+          J := C + Length(Eres) - <span style="color: navy;">1</span>;
+          Continue;
+        <b>end</b>;
+        <b>if</b> IsValue(Str) <b>then</b> <b>begin</b>
+          <i style="color: navy;">// Выделяем</i>
+          Insert(Bnum, S, C);
+          C := C + Length(Bnum + Str);
+          Insert(Enum, S, C);
+          J := C + Length(Enum) - <span style="color: navy;">1</span>;
+          Continue;
+        <b>end</b>;
+
+      <b>end</b>;
+    <b>end</b>;
+    HTMLList.Add(S);
+  <b>end</b>;
+  HTMLList.Add(<span style="color: navy;">'&lt;/pre&gt;'</span>);
+  <b>if</b> GenHTMLPage <b>then</b> <b>begin</b>
+    HTMLList.Add(<span style="color: navy;">'&lt;/body&gt;'</span>);
+    HTMLList.Add(<span style="color: navy;">'&lt;/html&gt;'</span>);
+
+  <b>end</b>;
+  Result := HTMLList.Text;
+<b>end</b>;
+
+<b>constructor</b> TDelphiToHTML.Create;
+<b>begin</b>
+  ReservList := TStringList.Create;
+  DelphiList := TStringList.Create;
+  HTMLList := TStringList.Create;
+  LoadReservList(); <i style="color: navy;">// Загружаем зарезервированные слова</i>
+  <i style="color: navy;">// Используемые разделители:</i>
+  DelimSet := [<span style="color: navy;">','</span>, <span style="color: navy;">';'</span>, <span style="color: navy;">':'</span>, <span style="color: navy;">'='</span>, <span style="color: navy;">'+'</span>, <span style="color: navy;">'-'</span>, <span style="color: navy;">'*'</span>, <span style="color: navy;">'/'</span>, <span style="color: navy;">' '</span>, <span style="color: navy;">''</span><span style="color: navy;">''</span>, <span style="color: navy;">'@'</span>, <span style="color: navy;">'('</span>, <span style="color: navy;">')'</span>,
+    <span style="color: navy;">'['</span>, <span style="color: navy;">']'</span>];
+  <i style="color: navy;">//Bcom, Ecom, Bres, Eres, Bnum, Enum, Bstr, Estr.</i>
+  Bcom := <span style="color: navy;">'&lt;i style="color: navy;"&gt;'</span>; Ecom := <span style="color: navy;">'&lt;/i&gt;'</span>; <i style="color: navy;">// Комментарии</i>
+  Bres := <span style="color: navy;">'&lt;b&gt;'</span>; ERes := <span style="color: navy;">'&lt;/b&gt;'</span>; <i style="color: navy;">// Зарезервированные слова</i>
+  Bnum := <span style="color: navy;">'&lt;span style="color: navy;"&gt;'</span>; Enum := <span style="color: navy;">'&lt;/span&gt;'</span>; <i style="color: navy;">// Числа</i>
+  Bstr := <span style="color: navy;">'&lt;span style="color: navy;"&gt;'</span>; Estr := <span style="color: navy;">'&lt;/span&gt;'</span>; <i style="color: navy;">// Строки</i>
+  Bdir := <span style="color: navy;">'&lt;span style="color: green;"&gt;'</span>; Edir := <span style="color: navy;">'&lt;/span&gt;'</span>;
+<b>end</b>;
+
+<b>destructor</b> TDelphiToHTML.Destroy;
+<b>begin</b>
+  ReservList.Free;
+  DelphiList.Free;
+  HTMLList.Free;
+  <b>inherited</b> Destroy;
+<b>end</b>;
+
+<b>function</b> TDelphiToHTML.GetWord(nByte: Integer; S: <b>string</b>): <b>string</b>;
+<b>var</b>
+  I: Integer;
+<b>begin</b>
+  Result := <span style="color: navy;">''</span>;
+  <b>for</b> I := nByte <b>to</b> Length(S) <b>do</b>
+    <b>if</b> (S[I] <b>in</b> DelimSet) <b>then</b> Exit <b>else</b> Result := Result + S[I];
+<b>end</b>;
+
+<b>function</b> TDelphiToHTML.IsReservWord(S: <b>string</b>): Boolean;
+<b>var</b>
+  I: Integer;
+<b>begin</b>
+  Result := False;
+  S := AnsiLowerCase(S);
+  <b>for</b> I := <span style="color: navy;">0</span> <b>to</b> ReservList.Count - <span style="color: navy;">1</span> <b>do</b>
+    <b>if</b> ReservList[I] = S <b>then</b> <b>begin</b> Result := True; Exit; <b>end</b>;
+<b>end</b>;
+
+<b>function</b> TDelphiToHTML.IsValue(S: <b>string</b>): Boolean;
+<b>var</b>
+  I: Integer;
+<b>begin</b>
+  Result := False;
+  <b>if</b> S = <span style="color: navy;">''</span> <b>then</b> Exit;
+  <b>if</b> S = <span style="color: navy;">'.'</span> <b>then</b> Exit;
+  <b>if</b> <b>not</b> (S[<span style="color: navy;">1</span>] <b>in</b> [<span style="color: navy;">'0'</span>..<span style="color: navy;">'9'</span>, <span style="color: navy;">'$'</span>, <span style="color: navy;">'#'</span>, <span style="color: navy;">'.'</span>]) <b>then</b> Exit;
+
+  <b>if</b> Length(S) = <span style="color: navy;">1</span> <b>then</b> <b>begin</b> Result := True; Exit; <b>end</b>;
+
+  <b>for</b> I := <span style="color: navy;">2</span> <b>to</b> length(S) <b>do</b>
+    <b>if</b> <b>not</b> (S[I] <b>in</b> [<span style="color: navy;">'0'</span>..<span style="color: navy;">'9'</span>, <span style="color: navy;">'$'</span>, <span style="color: navy;">'#'</span>, <span style="color: navy;">'.'</span>, <span style="color: navy;">'a'</span>..<span style="color: navy;">'f'</span>, <span style="color: navy;">'A'</span>..<span style="color: navy;">'F'</span>]) <b>then</b> Exit;
+  Result := True;
+<b>end</b>;
+
+<b>procedure</b> TDelphiToHTML.LoadReservList;
+<b>begin</b>
+  <b>with</b> ReservList <b>do</b> <b>begin</b>
+    Add(<span style="color: navy;">'constructor'</span>); Add(<span style="color: navy;">'string'</span>);
+    Add(<span style="color: navy;">'destructor'</span>); Add(<span style="color: navy;">'uses'</span>);
+    Add(<span style="color: navy;">'inherited'</span>); Add(<span style="color: navy;">'var'</span>);
+    Add(<span style="color: navy;">'begin'</span>); Add(<span style="color: navy;">'type'</span>);
+    Add(<span style="color: navy;">'end'</span>); Add(<span style="color: navy;">'class'</span>);
+    Add(<span style="color: navy;">'if'</span>); Add(<span style="color: navy;">'record'</span>);
+    Add(<span style="color: navy;">'then'</span>); Add(<span style="color: navy;">'array'</span>);
+    Add(<span style="color: navy;">'else'</span>); Add(<span style="color: navy;">'of'</span>);
+    Add(<span style="color: navy;">'with'</span>); Add(<span style="color: navy;">'set'</span>);
+    Add(<span style="color: navy;">'do'</span>); Add(<span style="color: navy;">'in'</span>);
+    Add(<span style="color: navy;">'for'</span>); Add(<span style="color: navy;">'out'</span>);
+    Add(<span style="color: navy;">'to'</span>); Add(<span style="color: navy;">'case'</span>);
+    Add(<span style="color: navy;">'while'</span>); Add(<span style="color: navy;">'until'</span>);
+    Add(<span style="color: navy;">'repeat'</span>); Add(<span style="color: navy;">'end.'</span>);
+    Add(<span style="color: navy;">'downto'</span>); Add(<span style="color: navy;">'private'</span>);
+    Add(<span style="color: navy;">'stdcall'</span>); Add(<span style="color: navy;">'public'</span>);
+    Add(<span style="color: navy;">'overload'</span>); Add(<span style="color: navy;">'published'</span>);
+    Add(<span style="color: navy;">'override'</span>); Add(<span style="color: navy;">'procedure'</span>);
+    Add(<span style="color: navy;">'unit'</span>); Add(<span style="color: navy;">'function'</span>);
+    Add(<span style="color: navy;">'interface'</span>); Add(<span style="color: navy;">'try'</span>);
+    Add(<span style="color: navy;">'implementation'</span>); Add(<span style="color: navy;">'except'</span>);
+    Add(<span style="color: navy;">'property'</span>); Add(<span style="color: navy;">'virtual'</span>); 
+    Add(<span style="color: navy;">'const'</span>); Add(<span style="color: navy;">'asm'</span>);
+    Add(<span style="color: navy;">'initialization'</span>); Add(<span style="color: navy;">'finalization'</span>);
+    Add(<span style="color: navy;">'packed'</span>); Add(<span style="color: navy;">'nil'</span>);
+    Add(<span style="color: navy;">'finally'</span>);
+    Add(<span style="color: navy;">'or'</span>); Add(<span style="color: navy;">'and'</span>); Add(<span style="color: navy;">'not'</span>);
+    Add(<span style="color: navy;">'mod'</span>); Add(<span style="color: navy;">'div'</span>); Add(<span style="color: navy;">'shr'</span>);
+    Add(<span style="color: navy;">'shl'</span>);
+  <b>end</b>;
+<b>end</b>;
+
+<b>procedure</b> TDelphiToHTML.ReplaceText(CharNum: Integer; OldText,
+  NewText: <b>string</b>; <b>var</b> Text: <b>string</b>);
+<b>begin</b>
+  Delete(Text, CharNum, Length(OldText));
+  Insert(NewText, Text, CharNum);
+<b>end</b>;
+
+<b>end.</b>
+
+</pre>
